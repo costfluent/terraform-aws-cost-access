@@ -38,7 +38,7 @@ Then:
 
 ```bash
 terraform apply
-terraform output -raw credentials_json | pbcopy
+terraform output -raw credentials_json
 ```
 
 Paste into Costfluent → Providers → Add provider → Amazon Web Services.
