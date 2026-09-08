@@ -1,6 +1,6 @@
 # terraform-aws-cost-access
 
-Grants [Costfluent](https://costfluent.io) read-only access to one AWS account's cost data.
+Grants [Costfluent](https://costfluent.com) read-only access to one AWS account's cost data.
 
 The module creates an IAM role that Costfluent assumes from its own account, proving intent with
 the external ID your Costfluent connection page generates, and attaches a policy allowing Cost
@@ -66,14 +66,22 @@ The credential field names are Costfluent's contract. Do not rename them on the 
 
 ## Permissions granted
 
-Read-only Cost Explorer, at account scope — `ce:GetCostAndUsage`, `ce:GetCostForecast`,
-`ce:GetDimensionValues`, `ce:GetTags`, `ce:GetReservationUtilization` and
-`ce:GetSavingsPlansUtilization`. Cost Explorer has no resource-level permissions, so the policy's
-resource is necessarily `*`; it still grants no access to any resource in the account.
+Two read-only Cost Explorer operations, and nothing else:
 
-The role can only be assumed by the Costfluent account named in `costfluent_account_id`, and only
-when the caller presents the matching external ID — the standard guard against a confused-deputy
-attack by another Costfluent tenant.
+| Action | Why |
+|---|---|
+| `ce:GetCostAndUsage` | Reads the cost and usage records Costfluent collects. |
+| `ce:ListCostAllocationTags` | Reads the names of your active cost allocation tags. Returns tag keys only, never values or cost. |
+
+Cost Explorer has no resource-level permissions, so the policy's resource is necessarily `*`. That
+grants no access to any resource in the account — only to these two API calls.
+
+Forecasting, dimension values and reservation or Savings Plans utilization are computed by
+Costfluent from data it has already collected, not fetched from your account, so no permission for
+them is requested.
+
+The role is assumable only by the Costfluent account named in `costfluent_account_id`, and only
+when the caller presents the matching external ID.
 
 ## Security
 

@@ -37,14 +37,14 @@ resource "aws_iam_role_policy" "costfluent_billing" {
     Statement = [{
       Sid    = "CostExplorerReadOnly"
       Effect = "Allow"
-      # Cost Explorer has no resource-level permissions; "*" is the only valid resource.
+      # Exactly the two Cost Explorer operations Costfluent calls with this role, and no more.
+      # Forecasting, dimension values and utilization reports are served from Costfluent's own
+      # store, not from the customer's account, so granting them here would be privilege nobody
+      # ever exercises. Cost Explorer has no resource-level permissions, so "*" is the only
+      # resource the API accepts — it still grants no access to anything in the account.
       Action = [
         "ce:GetCostAndUsage",
-        "ce:GetCostForecast",
-        "ce:GetDimensionValues",
-        "ce:GetTags",
-        "ce:GetReservationUtilization",
-        "ce:GetSavingsPlansUtilization",
+        "ce:ListCostAllocationTags",
       ]
       Resource = "*"
     }]
