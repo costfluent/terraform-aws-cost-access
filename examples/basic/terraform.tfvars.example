@@ -1,0 +1,4 @@
+# Both values come from the Costfluent connection page. The external ID is generated there per
+# connection; do not invent one.
+costfluent_account_id = "000000000000"
+external_id           = "replace-with-the-value-costfluent-shows"
