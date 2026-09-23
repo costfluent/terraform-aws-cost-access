@@ -1,23 +1,34 @@
-# The credential field names are the contract Costfluent validates against
-# (ProviderDefinitions.Aws.RequiredCredentialFields in the Costfluent backend). Renaming one here
-# breaks every connection made with this module; scripts/check-integration-contract.py asserts it.
+# The field names are the contract Costfluent validates against: credentials against
+# ProviderDefinitions.Aws.RequiredCredentialFields, settings against its OptionalSettingFields.
+# Renaming one here breaks every connection made with this module; scripts/check-integration-contract.py
+# asserts both. Neither authenticates: access comes from the role's trust in Costfluent's principal
+# and your organization's external ID, which Costfluent adds itself.
 locals {
   credentials = {
-    role_arn    = aws_iam_role.costfluent.arn
-    external_id = var.external_id
+    role_arn = aws_iam_role.costfluent.arn
   }
+
+  settings = local.create_export ? {
+    export_bucket        = var.cost_export_bucket_name
+    export_bucket_region = var.cost_export_bucket_region
+    export_prefix        = "costfluent"
+    export_name          = var.export_name
+  } : {}
 }
 
 output "credentials" {
-  description = "Credential fields for the Costfluent AWS connection."
-  sensitive   = true
+  description = "Credential fields for costfluent_provider."
   value       = local.credentials
 }
 
 output "credentials_json" {
-  description = "The same credentials as a JSON object, ready to paste into Costfluent."
-  sensitive   = true
+  description = "The same credentials as a JSON object, for the Costfluent console."
   value       = jsonencode(local.credentials)
+}
+
+output "settings" {
+  description = "Settings for costfluent_provider: where the FOCUS export lands. Empty in a member account."
+  value       = local.settings
 }
 
 output "role_arn" {

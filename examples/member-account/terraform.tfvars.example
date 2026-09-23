@@ -1,0 +1,3 @@
+# Both values come from `data "costfluent_aws_provider_info"` or the Costfluent console.
+costfluent_principal_arn = "arn:aws:iam::000000000000:role/costfluent-connector-prod"
+external_id              = "cf-00000000000000000000000000000000"
