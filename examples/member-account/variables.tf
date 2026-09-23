@@ -8,8 +8,3 @@ variable "external_id" {
   type        = string
   sensitive   = true
 }
-
-variable "cost_export_bucket_name" {
-  description = "A globally unique name for the export bucket."
-  type        = string
-}

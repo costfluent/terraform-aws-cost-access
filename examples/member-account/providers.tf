@@ -9,8 +9,7 @@ terraform {
   }
 }
 
-# AWS Data Exports runs in us-east-1, so the export is created there; the bucket can be elsewhere
-# through cost_export_bucket_region.
+# IAM is global; the region only picks an endpoint.
 provider "aws" {
   region = "us-east-1"
 }

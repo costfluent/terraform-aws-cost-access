@@ -1,0 +1,407 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Grants Costfluent read-only access to this account's cost data and, in a management account, creates the FOCUS 1.2 Data Export Costfluent reads. Costfluent issues every parameter; open it from the Costfluent console.",
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "Costfluent (filled in by Costfluent, do not change)"
+          },
+          "Parameters": [
+            "CostfluentPrincipalArn",
+            "ExternalId",
+            "HandshakeId",
+            "PingbackTopicArn"
+          ]
+        },
+        {
+          "Label": {
+            "default": "Cost export"
+          },
+          "Parameters": [
+            "CreateCostExport",
+            "BucketName",
+            "ExportName"
+          ]
+        }
+      ]
+    }
+  },
+  "Parameters": {
+    "CostfluentPrincipalArn": {
+      "Type": "String",
+      "Description": "The Costfluent role this account's role trusts.",
+      "AllowedPattern": "^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$"
+    },
+    "ExternalId": {
+      "Type": "String",
+      "Description": "Your Costfluent organization's external ID.",
+      "AllowedPattern": "^cf-[0-9a-f]{32}$",
+      "NoEcho": true
+    },
+    "HandshakeId": {
+      "Type": "String",
+      "Description": "Ties this stack to the connection you started in Costfluent."
+    },
+    "PingbackTopicArn": {
+      "Type": "String",
+      "Description": "Where the stack tells Costfluent the role is ready.",
+      "AllowedPattern": "^arn:aws[a-z-]*:sns:us-east-1:[0-9]{12}:.+$"
+    },
+    "CreateCostExport": {
+      "Type": "String",
+      "Description": "true in a management or standalone account; false in a member account, whose cost arrives through the management account's export.",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "true"
+    },
+    "BucketName": {
+      "Type": "String",
+      "Description": "The bucket to create for the export. Ignored when CreateCostExport is false.",
+      "AllowedPattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+    },
+    "ExportName": {
+      "Type": "String",
+      "Description": "The name of the Data Export.",
+      "Default": "costfluent-focus",
+      "AllowedPattern": "^[A-Za-z0-9_-]{1,128}$"
+    }
+  },
+  "Rules": {
+    "UsEast1Only": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Equals": [
+              {
+                "Ref": "AWS::Region"
+              },
+              "us-east-1"
+            ]
+          },
+          "AssertDescription": "Create this stack in us-east-1: AWS Data Exports and the Costfluent pingback run there."
+        }
+      ]
+    }
+  },
+  "Conditions": {
+    "CreateExport": {
+      "Fn::Equals": [
+        {
+          "Ref": "CreateCostExport"
+        },
+        "true"
+      ]
+    }
+  },
+  "Resources": {
+    "CostfluentRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Read-only cost access for Costfluent.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "CostfluentAssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Ref": "CostfluentPrincipalArn"
+                }
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "sts:ExternalId": {
+                    "Ref": "ExternalId"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "CostfluentCostRead",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "CostExplorerReadOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ce:GetCostAndUsage"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Sid": "OrganizationsReadOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "organizations:ListAccounts"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "CostfluentExportRead": {
+      "Type": "AWS::IAM::RolePolicy",
+      "Condition": "CreateExport",
+      "Properties": {
+        "RoleName": {
+          "Ref": "CostfluentRole"
+        },
+        "PolicyName": "CostfluentExportRead",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "ExportBucketList",
+              "Effect": "Allow",
+              "Action": [
+                "s3:ListBucket"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}"
+              }
+            },
+            {
+              "Sid": "ExportObjectRead",
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}/*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ExportBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Condition": "CreateExport",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": {
+          "Ref": "BucketName"
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ExportBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Condition": "CreateExport",
+      "Properties": {
+        "Bucket": {
+          "Ref": "ExportBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowDataExportsDelivery",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "billingreports.amazonaws.com",
+                  "bcm-data-exports.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "s3:PutObject",
+                "s3:GetBucketPolicy"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}/*"
+                }
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "StringLike": {
+                  "aws:SourceArn": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cur:us-east-1:${AWS::AccountId}:definition/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:bcm-data-exports:us-east-1:${AWS::AccountId}:export/*"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "FocusExport": {
+      "Type": "AWS::BCMDataExports::Export",
+      "Condition": "CreateExport",
+      "DependsOn": "ExportBucketPolicy",
+      "Properties": {
+        "Export": {
+          "Name": {
+            "Ref": "ExportName"
+          },
+          "Description": "FOCUS 1.2 cost and usage for Costfluent.",
+          "DataQuery": {
+            "QueryStatement": "SELECT AvailabilityZone, BilledCost, BillingAccountId, BillingAccountName, BillingAccountType, BillingCurrency, BillingPeriodEnd, BillingPeriodStart, CapacityReservationId, CapacityReservationStatus, ChargeCategory, ChargeClass, ChargeDescription, ChargeFrequency, ChargePeriodEnd, ChargePeriodStart, CommitmentDiscountCategory, CommitmentDiscountId, CommitmentDiscountName, CommitmentDiscountQuantity, CommitmentDiscountStatus, CommitmentDiscountType, CommitmentDiscountUnit, ConsumedQuantity, ConsumedUnit, ContractedCost, ContractedUnitPrice, EffectiveCost, InvoiceId, InvoiceIssuerName, ListCost, ListUnitPrice, PricingCategory, PricingCurrency, PricingCurrencyContractedUnitPrice, PricingCurrencyEffectiveCost, PricingCurrencyListUnitPrice, PricingQuantity, PricingUnit, ProviderName, PublisherName, RegionId, RegionName, ResourceId, ResourceName, ResourceType, ServiceCategory, ServiceName, ServiceSubcategory, SkuId, SkuMeter, SkuPriceDetails, SkuPriceId, SubAccountId, SubAccountName, SubAccountType, Tags, x_Discounts, x_Operation, x_ServiceCode FROM FOCUS_1_2_AWS",
+            "TableConfigurations": {
+              "FOCUS_1_2_AWS": {
+                "TIME_GRANULARITY": "DAILY"
+              }
+            }
+          },
+          "DestinationConfigurations": {
+            "S3Destination": {
+              "S3Bucket": {
+                "Ref": "ExportBucket"
+              },
+              "S3Prefix": "costfluent",
+              "S3Region": "us-east-1",
+              "S3OutputConfigurations": {
+                "Overwrite": "OVERWRITE_REPORT",
+                "Format": "TEXT_OR_CSV",
+                "Compression": "GZIP",
+                "OutputType": "CUSTOM"
+              }
+            }
+          },
+          "RefreshCadence": {
+            "Frequency": "SYNCHRONOUS"
+          }
+        }
+      }
+    },
+    "CostfluentConnection": {
+      "Type": "Custom::CostfluentConnection",
+      "Properties": {
+        "ServiceToken": {
+          "Ref": "PingbackTopicArn"
+        },
+        "HandshakeId": {
+          "Ref": "HandshakeId"
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "CostfluentRole",
+            "Arn"
+          ]
+        },
+        "BucketName": {
+          "Fn::If": [
+            "CreateExport",
+            {
+              "Ref": "ExportBucket"
+            },
+            ""
+          ]
+        },
+        "ExportName": {
+          "Fn::If": [
+            "CreateExport",
+            {
+              "Ref": "ExportName"
+            },
+            ""
+          ]
+        },
+        "ExportReadPolicy": {
+          "Fn::If": [
+            "CreateExport",
+            {
+              "Ref": "CostfluentExportRead"
+            },
+            ""
+          ]
+        },
+        "ExportArn": {
+          "Fn::If": [
+            "CreateExport",
+            {
+              "Ref": "FocusExport"
+            },
+            ""
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "RoleArn": {
+      "Description": "The role Costfluent assumes.",
+      "Value": {
+        "Fn::GetAtt": [
+          "CostfluentRole",
+          "Arn"
+        ]
+      }
+    },
+    "BucketName": {
+      "Condition": "CreateExport",
+      "Description": "Where the FOCUS 1.2 export is delivered.",
+      "Value": {
+        "Ref": "ExportBucket"
+      }
+    },
+    "ExportName": {
+      "Condition": "CreateExport",
+      "Description": "The Data Export Costfluent reads.",
+      "Value": {
+        "Ref": "ExportName"
+      }
+    }
+  }
+}
