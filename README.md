@@ -107,7 +107,7 @@ when the module creates the bucket. The role is assumable only by the principal 
 - **Cost:** reading the export from Costfluent is S3 data transfer out on your bill; a daily export
   is typically megabytes a month.
 
-## Upgrading from 0.1
+## Upgrading from 0.1.x
 
 0.2.0 is breaking. `costfluent_account_id` is replaced by `costfluent_principal_arn`, the trust
 names one Costfluent role rather than a whole account, `external_id` must be the value Costfluent
