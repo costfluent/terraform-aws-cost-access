@@ -1,11 +1,11 @@
 # Grants Costfluent read-only access to one AWS account's cost data, and in a management account
-# creates the FOCUS 1.2 Data Export Costfluent reads.
+# creates the FOCUS 1.2 and carbon emissions Data Exports Costfluent reads.
 #
 # Costfluent assumes this role from its connector role, proving intent with the external ID that
 # Costfluent issues to your organization (the costfluent_aws_provider_info data source). The role
 # can read Cost Explorer, list the organization's accounts, and read the export bucket; nothing
-# else. Every action granted here is one the Costfluent backend calls, and
-# scripts/check-integration-contract.py fails the Costfluent build when the two differ.
+# else. Every action granted here is one the Costfluent backend calls, and Costfluent's own build
+# fails when the two differ.
 
 data "aws_caller_identity" "current" {}
 
@@ -18,6 +18,11 @@ locals {
   partition     = data.aws_partition.current.partition
   create_export = var.cost_export_bucket_name != ""
   bucket_arn    = "arn:${local.partition}:s3:::${var.cost_export_bucket_name}"
+
+  # The prefix the export is written under, reported in the settings output and the only place the
+  # role may read objects. It is Costfluent's default export prefix; the three read this one value
+  # so the export cannot land where the role cannot read it.
+  export_prefix = "costfluent"
 
   # The FOCUS 1.2 with AWS columns table, every column, as the Data Exports column dictionary lists
   # it (table-dictionary-focus-1-2-aws-columns). The CloudFormation template selects the same list.
@@ -35,6 +40,24 @@ locals {
     "ServiceCategory", "ServiceName", "ServiceSubcategory", "SkuId", "SkuMeter", "SkuPriceDetails",
     "SkuPriceId", "SubAccountId", "SubAccountName", "SubAccountType", "Tags", "x_Discounts", "x_Operation",
     "x_ServiceCode",
+  ]
+
+  # The carbon export rides on the FOCUS export's bucket and prefix, which the role already reads,
+  # so it needs no grant of its own.
+  create_carbon_export = local.create_export && var.carbon_export_name != ""
+
+  # The CARBON_EMISSIONS table, every column, as the Data Exports column dictionary lists it
+  # (carbon-emissions-columns). The CloudFormation template selects the same list.
+  carbon_columns = [
+    "last_refresh_timestamp", "usage_period_start", "usage_period_end", "location", "model_version",
+    "payer_account_id", "usage_account_id", "product_code", "region_code",
+    "total_lbm_emissions_value", "total_lbm_emissions_unit",
+    "total_mbm_emissions_value", "total_mbm_emissions_unit",
+    "total_scope_1_emissions_value", "total_scope_1_emissions_unit",
+    "total_scope_2_lbm_emissions_value", "total_scope_2_lbm_emissions_unit",
+    "total_scope_2_mbm_emissions_value", "total_scope_2_mbm_emissions_unit",
+    "total_scope_3_lbm_emissions_value", "total_scope_3_lbm_emissions_unit",
+    "total_scope_3_mbm_emissions_value", "total_scope_3_mbm_emissions_unit",
   ]
 }
 
@@ -78,11 +101,32 @@ resource "aws_iam_role_policy" "costfluent_cost_read" {
         Resource = "*"
       },
       {
+        Sid    = "CostExplorerCommitmentsReadOnly"
+        Effect = "Allow"
+        # The Reserved Instances and Savings Plans the account holds, with their utilisation and
+        # end dates, read once a day into Commitments. Cost Explorer has no resource-level
+        # permissions, so "*" is the only resource it accepts.
+        Action = [
+          "ce:GetReservationUtilization",
+          "ce:GetSavingsPlansUtilizationDetails",
+        ]
+        Resource = "*"
+      },
+      {
         Sid    = "OrganizationsReadOnly"
         Effect = "Allow"
         # Which member accounts a management account's cost covers. Denied or unused outside an
         # organization, which Costfluent treats as one account.
         Action   = ["organizations:ListAccounts"]
+        Resource = "*"
+      },
+      {
+        Sid    = "CostOptimizationHubReadOnly"
+        Effect = "Allow"
+        # The rightsizing, idle, upgrade and commitment purchase recommendations Cost Optimization
+        # Hub already computes, read once a day into the savings queue. The API has no
+        # resource-level permissions, so "*" is the only resource it accepts.
+        Action   = ["cost-optimization-hub:ListRecommendations"]
         Resource = "*"
       },
     ]
@@ -98,6 +142,10 @@ resource "aws_iam_role_policy" "costfluent_export_read" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # Listing stays on the whole bucket with no prefix condition: S3 answers a read of a missing
+      # key with 404 only to a role that may list the bucket, and Costfluent reads a month's missing
+      # manifest as "not delivered yet" from that 404 rather than failing on a 403. A list shows key
+      # names, not contents.
       {
         Sid      = "ExportBucketList"
         Effect   = "Allow"
@@ -108,7 +156,7 @@ resource "aws_iam_role_policy" "costfluent_export_read" {
         Sid      = "ExportObjectRead"
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
-        Resource = "${local.bucket_arn}/*"
+        Resource = "${local.bucket_arn}/${local.export_prefix}/*"
       },
     ]
   })
@@ -205,7 +253,7 @@ resource "aws_bcmdataexports_export" "focus" {
     destination_configurations {
       s3_destination {
         s3_bucket = aws_s3_bucket.export[0].id
-        s3_prefix = "costfluent"
+        s3_prefix = local.export_prefix
         s3_region = var.cost_export_bucket_region
 
         s3_output_configurations {
@@ -228,6 +276,57 @@ resource "aws_bcmdataexports_export" "focus" {
     precondition {
       condition     = data.aws_region.current.region == "us-east-1"
       error_message = "AWS Data Exports runs in us-east-1: configure this module's aws provider with region = \"us-east-1\". The export bucket may be elsewhere through cost_export_bucket_region."
+    }
+  }
+
+  depends_on = [aws_s3_bucket_policy.export]
+}
+
+# The provider-reported carbon footprint of the same accounts, monthly, in the bucket and under the
+# prefix the FOCUS export uses. CARBON_EMISSIONS has no table configurations. Whoever applies this
+# needs sustainability:GetCarbonFootprintSummary; set carbon_export_name = "" to skip it.
+resource "aws_bcmdataexports_export" "carbon" {
+  count = local.create_carbon_export ? 1 : 0
+
+  export {
+    name        = var.carbon_export_name
+    description = "Carbon emissions for Costfluent."
+
+    data_query {
+      query_statement = "SELECT ${join(", ", local.carbon_columns)} FROM CARBON_EMISSIONS"
+    }
+
+    destination_configurations {
+      s3_destination {
+        s3_bucket = aws_s3_bucket.export[0].id
+        s3_prefix = local.export_prefix
+        s3_region = var.cost_export_bucket_region
+
+        s3_output_configurations {
+          overwrite   = "OVERWRITE_REPORT"
+          format      = "PARQUET"
+          compression = "PARQUET"
+          output_type = "CUSTOM"
+        }
+      }
+    }
+
+    refresh_cadence {
+      frequency = "SYNCHRONOUS"
+    }
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = data.aws_region.current.region == "us-east-1"
+      error_message = "AWS Data Exports runs in us-east-1: configure this module's aws provider with region = \"us-east-1\". The export bucket may be elsewhere through cost_export_bucket_region."
+    }
+
+    precondition {
+      condition     = var.carbon_export_name != var.export_name
+      error_message = "carbon_export_name must differ from export_name: both exports live in one account, where an export name is unique."
     }
   }
 

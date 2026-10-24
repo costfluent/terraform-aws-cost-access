@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Grants Costfluent read-only access to this account's cost data and, in a management account, creates the FOCUS 1.2 Data Export Costfluent reads. Costfluent issues every parameter; open it from the Costfluent console.",
+  "Description": "Grants Costfluent read-only access to this account's cost data and, in a management account, creates the FOCUS 1.2 and carbon emissions Data Exports Costfluent reads. Costfluent issues every parameter; open it from the Costfluent console.",
   "Metadata": {
     "AWS::CloudFormation::Interface": {
       "ParameterGroups": [
@@ -22,7 +22,8 @@
           "Parameters": [
             "CreateCostExport",
             "BucketName",
-            "ExportName"
+            "ExportName",
+            "CreateCarbonExport"
           ]
         }
       ]
@@ -51,7 +52,7 @@
     },
     "CreateCostExport": {
       "Type": "String",
-      "Description": "true in a management or standalone account; false in a member account, whose cost arrives through the management account's export.",
+      "Description": "true creates the bucket and a daily FOCUS 1.2 Data Export, which in a member account holds only that account's cost; false connects through Cost Explorer only, for example where a service control policy blocks Data Exports.",
       "AllowedValues": [
         "true",
         "false"
@@ -68,6 +69,15 @@
       "Description": "The name of the Data Export.",
       "Default": "costfluent-focus",
       "AllowedPattern": "^[A-Za-z0-9_-]{1,128}$"
+    },
+    "CreateCarbonExport": {
+      "Type": "String",
+      "Description": "true to also export the account's carbon emissions, which needs sustainability:GetCarbonFootprintSummary; false to connect cost without them; set false if the stack fails on CarbonExport.",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "true"
     }
   },
   "Rules": {
@@ -94,6 +104,21 @@
           "Ref": "CreateCostExport"
         },
         "true"
+      ]
+    },
+    "CreateCarbon": {
+      "Fn::And": [
+        {
+          "Condition": "CreateExport"
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CreateCarbonExport"
+            },
+            "true"
+          ]
+        }
       ]
     }
   },
@@ -140,10 +165,27 @@
                   "Resource": "*"
                 },
                 {
+                  "Sid": "CostExplorerCommitmentsReadOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ce:GetReservationUtilization",
+                    "ce:GetSavingsPlansUtilizationDetails"
+                  ],
+                  "Resource": "*"
+                },
+                {
                   "Sid": "OrganizationsReadOnly",
                   "Effect": "Allow",
                   "Action": [
                     "organizations:ListAccounts"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Sid": "CostOptimizationHubReadOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "cost-optimization-hub:ListRecommendations"
                   ],
                   "Resource": "*"
                 }
@@ -181,7 +223,7 @@
                 "s3:GetObject"
               ],
               "Resource": {
-                "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}/*"
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}/costfluent/*"
               }
             }
           ]
@@ -325,6 +367,38 @@
         }
       }
     },
+    "CarbonExport": {
+      "Type": "AWS::BCMDataExports::Export",
+      "Condition": "CreateCarbon",
+      "DependsOn": "ExportBucketPolicy",
+      "Properties": {
+        "Export": {
+          "Name": "costfluent-carbon",
+          "Description": "Carbon emissions for Costfluent.",
+          "DataQuery": {
+            "QueryStatement": "SELECT last_refresh_timestamp, usage_period_start, usage_period_end, location, model_version, payer_account_id, usage_account_id, product_code, region_code, total_lbm_emissions_value, total_lbm_emissions_unit, total_mbm_emissions_value, total_mbm_emissions_unit, total_scope_1_emissions_value, total_scope_1_emissions_unit, total_scope_2_lbm_emissions_value, total_scope_2_lbm_emissions_unit, total_scope_2_mbm_emissions_value, total_scope_2_mbm_emissions_unit, total_scope_3_lbm_emissions_value, total_scope_3_lbm_emissions_unit, total_scope_3_mbm_emissions_value, total_scope_3_mbm_emissions_unit FROM CARBON_EMISSIONS"
+          },
+          "DestinationConfigurations": {
+            "S3Destination": {
+              "S3Bucket": {
+                "Ref": "ExportBucket"
+              },
+              "S3Prefix": "costfluent",
+              "S3Region": "us-east-1",
+              "S3OutputConfigurations": {
+                "Overwrite": "OVERWRITE_REPORT",
+                "Format": "PARQUET",
+                "Compression": "PARQUET",
+                "OutputType": "CUSTOM"
+              }
+            }
+          },
+          "RefreshCadence": {
+            "Frequency": "SYNCHRONOUS"
+          }
+        }
+      }
+    },
     "CostfluentConnection": {
       "Type": "Custom::CostfluentConnection",
       "Properties": {
@@ -375,6 +449,22 @@
             },
             ""
           ]
+        },
+        "CarbonExportName": {
+          "Fn::If": [
+            "CreateCarbon",
+            "costfluent-carbon",
+            ""
+          ]
+        },
+        "CarbonExportArn": {
+          "Fn::If": [
+            "CreateCarbon",
+            {
+              "Ref": "CarbonExport"
+            },
+            ""
+          ]
         }
       }
     }
@@ -402,6 +492,11 @@
       "Value": {
         "Ref": "ExportName"
       }
+    },
+    "CarbonExportName": {
+      "Condition": "CreateCarbon",
+      "Description": "The carbon emissions Data Export Costfluent reads.",
+      "Value": "costfluent-carbon"
     }
   }
 }
