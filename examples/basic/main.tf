@@ -1,4 +1,5 @@
-# A management (or standalone) account: the role, the export bucket and the FOCUS 1.2 export.
+# A management (or standalone) account: the role, the export bucket, the FOCUS 1.2 export and the
+# carbon emissions export.
 # In your own configuration, read both Costfluent values from the costfluent_aws_provider_info
 # data source instead of variables (see the module README).
 module "costfluent" {

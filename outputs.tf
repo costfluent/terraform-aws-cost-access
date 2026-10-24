@@ -1,7 +1,7 @@
-# The field names are the contract Costfluent validates against: credentials against
-# ProviderDefinitions.Aws.RequiredCredentialFields, settings against its OptionalSettingFields.
-# Renaming one here breaks every connection made with this module; scripts/check-integration-contract.py
-# asserts both. Neither authenticates: access comes from the role's trust in Costfluent's principal
+# The field names are the contract Costfluent validates against: the credential fields it requires
+# of an AWS connection and the optional settings it accepts.
+# Renaming one here breaks every connection made with this module, and Costfluent's own build checks
+# both. Neither authenticates: access comes from the role's trust in Costfluent's principal
 # and your organization's external ID, which Costfluent adds itself.
 locals {
   credentials = {
@@ -11,8 +11,9 @@ locals {
   settings = local.create_export ? {
     export_bucket        = var.cost_export_bucket_name
     export_bucket_region = var.cost_export_bucket_region
-    export_prefix        = "costfluent"
+    export_prefix        = local.export_prefix
     export_name          = var.export_name
+    carbon_export_name   = local.create_carbon_export ? var.carbon_export_name : null
   } : {}
 }
 
@@ -27,8 +28,9 @@ output "credentials_json" {
 }
 
 output "settings" {
-  description = "Settings for costfluent_provider: where the FOCUS export lands. Empty in a member account."
-  value       = local.settings
+  description = "Settings for costfluent_provider: where the FOCUS and carbon exports land. Empty in a member account."
+  # A setting the module did not create is left out rather than sent empty.
+  value = { for key, value in local.settings : key => value if value != null }
 }
 
 output "role_arn" {

@@ -47,6 +47,17 @@ variable "export_name" {
   }
 }
 
+variable "carbon_export_name" {
+  description = "Name of the carbon emissions Data Export, created beside the FOCUS export when cost_export_bucket_name is set. Creating it needs sustainability:GetCarbonFootprintSummary. Empty creates none."
+  type        = string
+  default     = "costfluent-carbon"
+
+  validation {
+    condition     = var.carbon_export_name == "" || can(regex("^[A-Za-z0-9_-]{1,128}$", var.carbon_export_name))
+    error_message = "Must be empty or hold only letters, digits, '-' and '_'."
+  }
+}
+
 variable "role_name" {
   description = "Name of the IAM role Costfluent assumes."
   type        = string
