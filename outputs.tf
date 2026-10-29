@@ -11,7 +11,7 @@ locals {
   settings = local.create_export ? {
     export_bucket        = var.cost_export_bucket_name
     export_bucket_region = var.cost_export_bucket_region
-    export_prefix        = local.export_prefix
+    export_prefix        = var.export_prefix
     export_name          = var.export_name
     carbon_export_name   = local.create_carbon_export ? var.carbon_export_name : null
   } : {}

@@ -1,0 +1,7 @@
+# Both Costfluent values come from `data "costfluent_aws_provider_info"` or the Costfluent console.
+# The external ID is issued to your organization; do not invent one.
+costfluent_principal_arn  = "arn:aws:iam::000000000000:role/costfluent-connector-prod"
+external_id               = "cf-00000000000000000000000000000000"
+cost_export_bucket_name   = "replace-with-your-bucket-name"
+cost_export_bucket_region = "eu-central-1"
+export_prefix             = "costfluent"

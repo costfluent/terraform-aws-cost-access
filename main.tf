@@ -19,10 +19,9 @@ locals {
   create_export = var.cost_export_bucket_name != ""
   bucket_arn    = "arn:${local.partition}:s3:::${var.cost_export_bucket_name}"
 
-  # The prefix the export is written under, reported in the settings output and the only place the
-  # role may read objects. It is Costfluent's default export prefix; the three read this one value
-  # so the export cannot land where the role cannot read it.
-  export_prefix = "costfluent"
+  # A bucket or FOCUS export the customer already has is read, never created or changed.
+  create_bucket       = local.create_export && !var.cost_export_bucket_exists
+  create_focus_export = local.create_export && !var.cost_export_exists
 
   # The FOCUS 1.2 with AWS columns table, every column, as the Data Exports column dictionary lists
   # it (table-dictionary-focus-1-2-aws-columns). The CloudFormation template selects the same list.
@@ -124,9 +123,22 @@ resource "aws_iam_role_policy" "costfluent_cost_read" {
         Sid    = "CostOptimizationHubReadOnly"
         Effect = "Allow"
         # The rightsizing, idle, upgrade and commitment purchase recommendations Cost Optimization
-        # Hub already computes, read once a day into the savings queue. The API has no
-        # resource-level permissions, so "*" is the only resource it accepts.
-        Action   = ["cost-optimization-hub:ListRecommendations"]
+        # Hub already computes, read once a day into the savings queue, and whether the account
+        # is enrolled, so a hub that is not turned on reads as a step to take, not a refusal. The
+        # API has no resource-level permissions, so "*" is the only resource it accepts.
+        Action = [
+          "cost-optimization-hub:ListRecommendations",
+          "cost-optimization-hub:ListEnrollmentStatuses",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "CreditsReadOnly"
+        Effect = "Allow"
+        # The credits AWS has granted the account, or a management account's organization, with
+        # their remaining amounts and expiry, read once a day into the connection's Credits card.
+        # The action has no resource type, so "*" is the only resource it accepts.
+        Action   = ["billing:GetCredits"]
         Resource = "*"
       },
     ]
@@ -156,14 +168,14 @@ resource "aws_iam_role_policy" "costfluent_export_read" {
         Sid      = "ExportObjectRead"
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
-        Resource = "${local.bucket_arn}/${local.export_prefix}/*"
+        Resource = "${local.bucket_arn}/${var.export_prefix}/*"
       },
     ]
   })
 }
 
 resource "aws_s3_bucket" "export" {
-  count = local.create_export ? 1 : 0
+  count = local.create_bucket ? 1 : 0
 
   region = var.cost_export_bucket_region
   bucket = var.cost_export_bucket_name
@@ -171,7 +183,7 @@ resource "aws_s3_bucket" "export" {
 }
 
 resource "aws_s3_bucket_public_access_block" "export" {
-  count = local.create_export ? 1 : 0
+  count = local.create_bucket ? 1 : 0
 
   region                  = var.cost_export_bucket_region
   bucket                  = aws_s3_bucket.export[0].id
@@ -182,7 +194,7 @@ resource "aws_s3_bucket_public_access_block" "export" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "export" {
-  count = local.create_export ? 1 : 0
+  count = local.create_bucket ? 1 : 0
 
   region = var.cost_export_bucket_region
   bucket = aws_s3_bucket.export[0].id
@@ -196,7 +208,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "export" {
 
 # No lifecycle expiry: a backfill re-reads past months, and an expired delivery is history lost.
 resource "aws_s3_bucket_policy" "export" {
-  count = local.create_export ? 1 : 0
+  count = local.create_bucket ? 1 : 0
 
   region = var.cost_export_bucket_region
   bucket = aws_s3_bucket.export[0].id
@@ -235,7 +247,7 @@ resource "aws_s3_bucket_policy" "export" {
 }
 
 resource "aws_bcmdataexports_export" "focus" {
-  count = local.create_export ? 1 : 0
+  count = local.create_focus_export ? 1 : 0
 
   export {
     name        = var.export_name
@@ -252,8 +264,8 @@ resource "aws_bcmdataexports_export" "focus" {
 
     destination_configurations {
       s3_destination {
-        s3_bucket = aws_s3_bucket.export[0].id
-        s3_prefix = local.export_prefix
+        s3_bucket = var.cost_export_bucket_name
+        s3_prefix = var.export_prefix
         s3_region = var.cost_export_bucket_region
 
         s3_output_configurations {
@@ -298,8 +310,8 @@ resource "aws_bcmdataexports_export" "carbon" {
 
     destination_configurations {
       s3_destination {
-        s3_bucket = aws_s3_bucket.export[0].id
-        s3_prefix = local.export_prefix
+        s3_bucket = var.cost_export_bucket_name
+        s3_prefix = var.export_prefix
         s3_region = var.cost_export_bucket_region
 
         s3_output_configurations {

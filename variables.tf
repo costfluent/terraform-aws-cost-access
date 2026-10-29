@@ -20,7 +20,7 @@ variable "external_id" {
 }
 
 variable "cost_export_bucket_name" {
-  description = "Bucket to create for the FOCUS 1.2 Data Export, in a management or standalone account. Leave empty in a member account: its cost arrives through the management account's export."
+  description = "Bucket to create for the FOCUS 1.2 Data Export, in a management or standalone account, or the bucket you already have when cost_export_bucket_exists is true. Leave empty in a member account: its cost arrives through the management account's export."
   type        = string
   default     = ""
 
@@ -30,10 +30,45 @@ variable "cost_export_bucket_name" {
   }
 }
 
+variable "cost_export_bucket_exists" {
+  description = "true delivers the exports to cost_export_bucket_name, a bucket you already have in this account, instead of creating it. The module writes no bucket policy on it: for a new export it must already allow AWS Data Exports to deliver."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.cost_export_bucket_exists || var.cost_export_bucket_name != ""
+    error_message = "cost_export_bucket_exists needs cost_export_bucket_name, the bucket you already have."
+  }
+}
+
 variable "cost_export_bucket_region" {
   description = "Region of the export bucket. The export itself always runs in us-east-1; an EU region keeps the delivered files in the EU."
   type        = string
   default     = "us-east-1"
+}
+
+variable "export_prefix" {
+  description = "Prefix the exports are delivered under, and the only one the role may read objects in. Costfluent reads s3://<bucket>/<export_prefix>/<export_name>/."
+  type        = string
+  default     = "costfluent"
+
+  # The same rule Costfluent holds the export_prefix setting to; no "*" means the read grant cannot
+  # widen to the whole bucket.
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", var.export_prefix)) && !strcontains(var.export_prefix, "..")
+    error_message = "May hold only letters, digits, '-', '_', '.' and '/', and no '..'."
+  }
+}
+
+variable "cost_export_exists" {
+  description = "true reads a FOCUS 1.2 Data Export you already deliver to s3://<cost_export_bucket_name>/<export_prefix>/<export_name>/ instead of creating one. It needs cost_export_bucket_exists, and the export must be FOCUS 1.2 with AWS columns, every column, daily."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.cost_export_exists || var.cost_export_bucket_exists
+    error_message = "cost_export_exists reads an export already in a bucket you have: set cost_export_bucket_exists = true too."
+  }
 }
 
 variable "export_name" {
