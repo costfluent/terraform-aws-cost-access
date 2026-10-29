@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Grants Costfluent read-only access to this account's cost data and, in a management account, creates the FOCUS 1.2 and carbon emissions Data Exports Costfluent reads. Costfluent issues every parameter; open it from the Costfluent console.",
+  "Description": "Grants Costfluent read-only access to this account's cost data and, in a management account, creates the FOCUS 1.2 and carbon emissions Data Exports Costfluent reads, in a bucket the stack creates or one you already have. Costfluent issues every parameter; open it from the Costfluent console.",
   "Metadata": {
     "AWS::CloudFormation::Interface": {
       "ParameterGroups": [
@@ -24,6 +24,17 @@
             "BucketName",
             "ExportName",
             "CreateCarbonExport"
+          ]
+        },
+        {
+          "Label": {
+            "default": "A bucket or export you already have"
+          },
+          "Parameters": [
+            "BucketExists",
+            "BucketRegion",
+            "ExportPrefix",
+            "ExportExists"
           ]
         }
       ]
@@ -61,7 +72,7 @@
     },
     "BucketName": {
       "Type": "String",
-      "Description": "The bucket to create for the export. Ignored when CreateCostExport is false.",
+      "Description": "The bucket to create for the export or, when BucketExists is true, the bucket you already have. Ignored when CreateCostExport is false.",
       "AllowedPattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
     },
     "ExportName": {
@@ -78,6 +89,36 @@
         "false"
       ],
       "Default": "true"
+    },
+    "BucketExists": {
+      "Type": "String",
+      "Description": "true delivers the exports to the bucket you already have in this account, named in BucketName and in BucketRegion, instead of creating one. The stack does not change that bucket's policy: for a new export it must already let AWS Data Exports deliver, as the Costfluent docs show.",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "false"
+    },
+    "BucketRegion": {
+      "Type": "String",
+      "Description": "The region of the bucket you already have. A bucket the stack creates is in us-east-1.",
+      "Default": "us-east-1",
+      "AllowedPattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$"
+    },
+    "ExportPrefix": {
+      "Type": "String",
+      "Description": "The folder the exports are delivered under, and the only one Costfluent may read files in: Costfluent reads s3://<BucketName>/<ExportPrefix>/<ExportName>/. Letters, digits, '-', '_', '.' and '/', with no '..'.",
+      "Default": "costfluent",
+      "AllowedPattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+    },
+    "ExportExists": {
+      "Type": "String",
+      "Description": "true reads a Data Export you already deliver to s3://<BucketName>/<ExportPrefix>/<ExportName>/ instead of creating one, and needs BucketExists true. It must be FOCUS 1.2 with AWS columns, every column, daily.",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "false"
     }
   },
   "Rules": {
@@ -93,6 +134,52 @@
             ]
           },
           "AssertDescription": "Create this stack in us-east-1: AWS Data Exports and the Costfluent pingback run there."
+        }
+      ]
+    },
+    "ExistingExportNeedsExistingBucket": {
+      "RuleCondition": {
+        "Fn::Equals": [
+          {
+            "Ref": "ExportExists"
+          },
+          "true"
+        ]
+      },
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Equals": [
+              {
+                "Ref": "BucketExists"
+              },
+              "true"
+            ]
+          },
+          "AssertDescription": "An export you already have is read from a bucket you already have: set BucketExists to true too."
+        }
+      ]
+    },
+    "CreatedBucketInUsEast1": {
+      "RuleCondition": {
+        "Fn::Equals": [
+          {
+            "Ref": "BucketExists"
+          },
+          "false"
+        ]
+      },
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Equals": [
+              {
+                "Ref": "BucketRegion"
+              },
+              "us-east-1"
+            ]
+          },
+          "AssertDescription": "The stack creates its bucket in us-east-1: leave BucketRegion at us-east-1, or set BucketExists to true for a bucket you already have elsewhere."
         }
       ]
     }
@@ -117,6 +204,36 @@
               "Ref": "CreateCarbonExport"
             },
             "true"
+          ]
+        }
+      ]
+    },
+    "CreateBucket": {
+      "Fn::And": [
+        {
+          "Condition": "CreateExport"
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "BucketExists"
+            },
+            "false"
+          ]
+        }
+      ]
+    },
+    "CreateFocusExport": {
+      "Fn::And": [
+        {
+          "Condition": "CreateExport"
+        },
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "ExportExists"
+            },
+            "false"
           ]
         }
       ]
@@ -185,7 +302,16 @@
                   "Sid": "CostOptimizationHubReadOnly",
                   "Effect": "Allow",
                   "Action": [
-                    "cost-optimization-hub:ListRecommendations"
+                    "cost-optimization-hub:ListRecommendations",
+                    "cost-optimization-hub:ListEnrollmentStatuses"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Sid": "CreditsReadOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "billing:GetCredits"
                   ],
                   "Resource": "*"
                 }
@@ -223,7 +349,7 @@
                 "s3:GetObject"
               ],
               "Resource": {
-                "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}/costfluent/*"
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${BucketName}/${ExportPrefix}/*"
               }
             }
           ]
@@ -232,7 +358,7 @@
     },
     "ExportBucket": {
       "Type": "AWS::S3::Bucket",
-      "Condition": "CreateExport",
+      "Condition": "CreateBucket",
       "DeletionPolicy": "Retain",
       "UpdateReplacePolicy": "Retain",
       "Properties": {
@@ -258,7 +384,7 @@
     },
     "ExportBucketPolicy": {
       "Type": "AWS::S3::BucketPolicy",
-      "Condition": "CreateExport",
+      "Condition": "CreateBucket",
       "Properties": {
         "Bucket": {
           "Ref": "ExportBucket"
@@ -328,10 +454,25 @@
         }
       }
     },
+    "ExportBucketReady": {
+      "Type": "AWS::CloudFormation::WaitConditionHandle",
+      "Condition": "CreateExport",
+      "Metadata": {
+        "BucketPolicy": {
+          "Fn::If": [
+            "CreateBucket",
+            {
+              "Ref": "ExportBucketPolicy"
+            },
+            ""
+          ]
+        }
+      }
+    },
     "FocusExport": {
       "Type": "AWS::BCMDataExports::Export",
-      "Condition": "CreateExport",
-      "DependsOn": "ExportBucketPolicy",
+      "Condition": "CreateFocusExport",
+      "DependsOn": "ExportBucketReady",
       "Properties": {
         "Export": {
           "Name": {
@@ -349,10 +490,22 @@
           "DestinationConfigurations": {
             "S3Destination": {
               "S3Bucket": {
-                "Ref": "ExportBucket"
+                "Fn::If": [
+                  "CreateBucket",
+                  {
+                    "Ref": "ExportBucket"
+                  },
+                  {
+                    "Ref": "BucketName"
+                  }
+                ]
               },
-              "S3Prefix": "costfluent",
-              "S3Region": "us-east-1",
+              "S3Prefix": {
+                "Ref": "ExportPrefix"
+              },
+              "S3Region": {
+                "Ref": "BucketRegion"
+              },
               "S3OutputConfigurations": {
                 "Overwrite": "OVERWRITE_REPORT",
                 "Format": "TEXT_OR_CSV",
@@ -370,7 +523,7 @@
     "CarbonExport": {
       "Type": "AWS::BCMDataExports::Export",
       "Condition": "CreateCarbon",
-      "DependsOn": "ExportBucketPolicy",
+      "DependsOn": "ExportBucketReady",
       "Properties": {
         "Export": {
           "Name": "costfluent-carbon",
@@ -381,10 +534,22 @@
           "DestinationConfigurations": {
             "S3Destination": {
               "S3Bucket": {
-                "Ref": "ExportBucket"
+                "Fn::If": [
+                  "CreateBucket",
+                  {
+                    "Ref": "ExportBucket"
+                  },
+                  {
+                    "Ref": "BucketName"
+                  }
+                ]
               },
-              "S3Prefix": "costfluent",
-              "S3Region": "us-east-1",
+              "S3Prefix": {
+                "Ref": "ExportPrefix"
+              },
+              "S3Region": {
+                "Ref": "BucketRegion"
+              },
               "S3OutputConfigurations": {
                 "Overwrite": "OVERWRITE_REPORT",
                 "Format": "PARQUET",
@@ -418,7 +583,25 @@
           "Fn::If": [
             "CreateExport",
             {
-              "Ref": "ExportBucket"
+              "Ref": "BucketName"
+            },
+            ""
+          ]
+        },
+        "BucketRegion": {
+          "Fn::If": [
+            "CreateExport",
+            {
+              "Ref": "BucketRegion"
+            },
+            ""
+          ]
+        },
+        "ExportPrefix": {
+          "Fn::If": [
+            "CreateExport",
+            {
+              "Ref": "ExportPrefix"
             },
             ""
           ]
@@ -443,7 +626,7 @@
         },
         "ExportArn": {
           "Fn::If": [
-            "CreateExport",
+            "CreateFocusExport",
             {
               "Ref": "FocusExport"
             },
@@ -483,7 +666,7 @@
       "Condition": "CreateExport",
       "Description": "Where the FOCUS 1.2 export is delivered.",
       "Value": {
-        "Ref": "ExportBucket"
+        "Ref": "BucketName"
       }
     },
     "ExportName": {
