@@ -23,6 +23,7 @@
             "CreateCostExport",
             "BucketName",
             "ExportName",
+            "CarbonExportName",
             "CreateCarbonExport"
           ]
         },
@@ -77,8 +78,13 @@
     },
     "ExportName": {
       "Type": "String",
-      "Description": "The name of the Data Export.",
-      "Default": "costfluent-focus",
+      "Description": "The Data Export to create or, when ExportExists is true, the one you already have. A Data Export's name is unique in the account, so Costfluent issues one for each connection.",
+      "AllowedPattern": "^[A-Za-z0-9_-]{1,128}$"
+    },
+    "CarbonExportName": {
+      "Type": "String",
+      "Description": "The carbon emissions Data Export to create when CreateCarbonExport is true. A Data Export's name is unique in the account, so Costfluent issues one for each connection; the default is the name earlier stacks created, which an update keeps.",
+      "Default": "costfluent-carbon",
       "AllowedPattern": "^[A-Za-z0-9_-]{1,128}$"
     },
     "CreateCarbonExport": {
@@ -526,7 +532,9 @@
       "DependsOn": "ExportBucketReady",
       "Properties": {
         "Export": {
-          "Name": "costfluent-carbon",
+          "Name": {
+            "Ref": "CarbonExportName"
+          },
           "Description": "Carbon emissions for Costfluent.",
           "DataQuery": {
             "QueryStatement": "SELECT last_refresh_timestamp, usage_period_start, usage_period_end, location, model_version, payer_account_id, usage_account_id, product_code, region_code, total_lbm_emissions_value, total_lbm_emissions_unit, total_mbm_emissions_value, total_mbm_emissions_unit, total_scope_1_emissions_value, total_scope_1_emissions_unit, total_scope_2_lbm_emissions_value, total_scope_2_lbm_emissions_unit, total_scope_2_mbm_emissions_value, total_scope_2_mbm_emissions_unit, total_scope_3_lbm_emissions_value, total_scope_3_lbm_emissions_unit, total_scope_3_mbm_emissions_value, total_scope_3_mbm_emissions_unit FROM CARBON_EMISSIONS"
@@ -636,7 +644,9 @@
         "CarbonExportName": {
           "Fn::If": [
             "CreateCarbon",
-            "costfluent-carbon",
+            {
+              "Ref": "CarbonExportName"
+            },
             ""
           ]
         },
@@ -679,7 +689,9 @@
     "CarbonExportName": {
       "Condition": "CreateCarbon",
       "Description": "The carbon emissions Data Export Costfluent reads.",
-      "Value": "costfluent-carbon"
+      "Value": {
+        "Ref": "CarbonExportName"
+      }
     }
   }
 }

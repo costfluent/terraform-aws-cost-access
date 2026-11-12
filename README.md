@@ -7,8 +7,10 @@ external ID Costfluent issues to your organization. In a management (or standalo
 also creates a private S3 bucket, a daily FOCUS 1.2 Data Export into it, and a monthly carbon
 emissions Data Export beside it, which is what Costfluent reads; or it delivers the exports to a
 bucket you already have, or reads a FOCUS 1.2 export that bucket already receives
-([A bucket you already have](#a-bucket-you-already-have)). In a member account it creates only the
-role: its cost and emissions arrive through the management account's exports.
+([A bucket you already have](#a-bucket-you-already-have)). In a member account whose management
+account you do not connect, it creates only the role, and Costfluent reads the account's cost from
+Cost Explorer. A member of a management account you do connect is covered by that connection: it
+needs no module, and Costfluent refuses a second connection for it.
 
 The same resources are available without Terraform as a CloudFormation template,
 [`cloudformation/costfluent-aws.json`](cloudformation/costfluent-aws.json), which the Costfluent
@@ -16,7 +18,7 @@ console opens for you.
 
 ## Requirements
 
-- Terraform >= 1.13 and the AWS provider ~> 6.63.
+- Terraform >= 1.9 or OpenTofu >= 1.12, and the AWS provider >= 6.40.0, < 7.0.0.
 - The `aws` provider configured for `us-east-1`: AWS Data Exports runs only there. The bucket can
   be elsewhere through `cost_export_bucket_region`.
 - Permission to create IAM roles and, in a management account, S3 buckets and Data Exports. The
@@ -39,7 +41,7 @@ data "costfluent_aws_provider_info" "this" {}
 
 module "costfluent" {
   source  = "costfluent/cost-access/aws"
-  version = "~> 0.2"
+  version = "~> 0.5"
 
   costfluent_principal_arn = data.costfluent_aws_provider_info.this.principal_arn
   external_id              = data.costfluent_aws_provider_info.this.external_id
@@ -74,6 +76,8 @@ the bucket into the console.
 | `cost_export_exists` | `true` reads a FOCUS 1.2 export the bucket already receives instead of creating one; needs `cost_export_bucket_exists`. | `bool` | `false` |
 | `carbon_export_name` | Name of the carbon emissions Data Export. Empty creates none. | `string` | `"costfluent-carbon"` |
 | `role_name` | Name of the IAM role. | `string` | `"CostfluentBillingRole"` |
+| `role_path` | Path of the IAM role, for guardrails that require one; the role ARN carries it. | `string` | `"/"` |
+| `role_permissions_boundary_arn` | IAM managed policy set as the role's permissions boundary; it must allow the role's reads. Null sets none. | `string` | `null` |
 | `tags` | Tags applied to every resource. | `map(string)` | `{}` |
 
 ## Outputs
@@ -172,6 +176,15 @@ a bucket policy is one document and writing it would replace every statement alr
 - **The bucket** must not be encrypted with a customer-managed KMS key: the role has no
   `kms:Decrypt`. A wrong region or a bucket policy that denies the role shows in Costfluent's Test
   connection, naming the bucket and region it could not read.
+
+## Organization guardrails
+
+Where a service control policy requires every new role to carry a permissions boundary or sit under
+a path, set `role_permissions_boundary_arn` to the boundary policy and `role_path` to the path, such
+as `/costfluent/`. A boundary only narrows the role: it must allow every action under
+[Permissions granted](#permissions-granted), or Costfluent's reads are denied while the apply
+succeeds. A path becomes part of the role ARN, `arn:aws:iam::<account>:role/costfluent/<role_name>`,
+which the `credentials` output already carries and Costfluent accepts as it is.
 
 ## Upgrading from 0.1.x
 

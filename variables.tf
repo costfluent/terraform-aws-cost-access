@@ -20,7 +20,7 @@ variable "external_id" {
 }
 
 variable "cost_export_bucket_name" {
-  description = "Bucket to create for the FOCUS 1.2 Data Export, in a management or standalone account, or the bucket you already have when cost_export_bucket_exists is true. Leave empty in a member account: its cost arrives through the management account's export."
+  description = "Bucket to create for the FOCUS 1.2 Data Export, in a management or standalone account, or the bucket you already have when cost_export_bucket_exists is true. Leave empty in a member account whose management account you do not connect: Costfluent reads its cost from Cost Explorer. A member of a management account you do connect needs no connection of its own, and Costfluent refuses one."
   type        = string
   default     = ""
 
@@ -101,6 +101,30 @@ variable "role_name" {
   validation {
     condition     = can(regex("^[a-zA-Z0-9+=,.@_-]{1,64}$", var.role_name))
     error_message = "Must be a valid IAM role name (up to 64 characters)."
+  }
+}
+
+variable "role_path" {
+  description = "Path of the IAM role, for an organization whose guardrails require roles under one. The role ARN you give Costfluent then reads arn:<partition>:iam::<account>:role/<path><role_name>."
+  type        = string
+  default     = "/"
+  nullable    = false
+
+  # IAM's own path grammar: printable ASCII but space, between a leading and a trailing slash.
+  validation {
+    condition     = length(var.role_path) <= 512 && can(regex("^/([!-~]+/)?$", var.role_path))
+    error_message = "Must start and end with '/', hold only printable ASCII characters but space, and be at most 512 characters."
+  }
+}
+
+variable "role_permissions_boundary_arn" {
+  description = "ARN of an IAM managed policy to set as the role's permissions boundary, for an organization whose guardrails require one on every role. A boundary only narrows the role: it must allow the role's own read permissions, or Costfluent's reads are denied. Null sets none."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.role_permissions_boundary_arn == null || can(regex("^arn:aws[a-z-]*:iam::([0-9]{12}|aws):policy/.+$", var.role_permissions_boundary_arn))
+    error_message = "Must be null or an IAM managed policy ARN: arn:<partition>:iam::<account ID, or aws for an AWS managed policy>:policy/<path><name>."
   }
 }
 
