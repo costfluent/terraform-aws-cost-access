@@ -64,6 +64,10 @@ resource "aws_iam_role" "costfluent" {
   name        = var.role_name
   description = "Read-only cost access for Costfluent."
 
+  # For organizations whose guardrails require a path or a permissions boundary on every new role.
+  path                 = var.role_path
+  permissions_boundary = var.role_permissions_boundary_arn
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

@@ -1,5 +1,7 @@
-# A member account of an AWS Organization: only the role. Its cost arrives through the management
-# account's export, so it gets no bucket and no export, and Costfluent reads Cost Explorer for it.
+# A member account of an AWS Organization whose management account you do not connect to Costfluent:
+# only the role, with no bucket and no export, and Costfluent reads the account's cost from Cost
+# Explorer. A member of a management account you do connect is covered by that connection, and
+# Costfluent refuses a second one for it.
 module "costfluent" {
   source = "../.."
 

@@ -60,6 +60,54 @@ run "export_read_covers_only_the_export_prefix" {
   }
 }
 
+run "focus_export_selects_every_column_the_reader_needs" {
+  command = apply
+
+  variables {
+    cost_export_bucket_name = "acme-export"
+  }
+
+  assert {
+    condition = (
+      startswith(aws_bcmdataexports_export.focus[0].export[0].data_query[0].query_statement, "SELECT ")
+      && endswith(aws_bcmdataexports_export.focus[0].export[0].data_query[0].query_statement, " FROM FOCUS_1_2_AWS")
+    )
+    error_message = "The FOCUS export must select columns from FOCUS_1_2_AWS, the table Costfluent's reader reads."
+  }
+
+  # Split into whole items so that BilledCostX does not pass for BilledCost.
+  assert {
+    condition = alltrue([
+      for column in [
+        "BilledCost", "BillingAccountId", "BillingCurrency", "ChargeCategory", "ChargePeriodEnd",
+        "ChargePeriodStart", "EffectiveCost", "ListCost", "ServiceName", "SubAccountId",
+      ] :
+      contains(
+        split(", ", trimsuffix(trimprefix(aws_bcmdataexports_export.focus[0].export[0].data_query[0].query_statement, "SELECT "), " FROM FOCUS_1_2_AWS")),
+        column,
+      )
+    ])
+    error_message = "The FOCUS export must select every column AwsFocusExportReader.RequiredColumns lists: the reader refuses a delivery missing one, days after a green connect."
+  }
+
+  assert {
+    condition     = aws_bcmdataexports_export.focus[0].export[0].data_query[0].table_configurations.FOCUS_1_2_AWS.TIME_GRANULARITY == "DAILY"
+    error_message = "The FOCUS export must be daily."
+  }
+
+  assert {
+    condition = (
+      aws_bcmdataexports_export.focus[0].export[0].destination_configurations[0].s3_destination[0].s3_output_configurations[0].overwrite == "OVERWRITE_REPORT"
+      && aws_bcmdataexports_export.focus[0].export[0].destination_configurations[0].s3_destination[0].s3_output_configurations[0].output_type == "CUSTOM"
+      && contains(["TEXT_OR_CSV/GZIP", "PARQUET/PARQUET"], join("/", [
+        aws_bcmdataexports_export.focus[0].export[0].destination_configurations[0].s3_destination[0].s3_output_configurations[0].format,
+        aws_bcmdataexports_export.focus[0].export[0].destination_configurations[0].s3_destination[0].s3_output_configurations[0].compression,
+      ]))
+    )
+    error_message = "The FOCUS export must overwrite one CUSTOM report as gzip CSV or Parquet, the only deliveries Costfluent's reader reads."
+  }
+}
+
 run "no_bucket_grants_no_export_read" {
   command = apply
 

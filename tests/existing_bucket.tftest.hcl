@@ -122,6 +122,32 @@ run "a_bucket_the_module_creates_keeps_its_policy_and_prefix" {
     error_message = "Without cost_export_bucket_exists the module must still create the bucket, its protections, its policy and the FOCUS export."
   }
 
+  # The mock provider generates the bucket's id, so only the real reference equals it; the run's
+  # bucket region differs from the provider's, so a hard-coded or defaulted region fails too.
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_public_access_block.export[0].bucket == aws_s3_bucket.export[0].id,
+      aws_s3_bucket_public_access_block.export[0].region == aws_s3_bucket.export[0].region,
+    ])
+    error_message = "The public access block must apply to the bucket the module creates, in its region: bound to any other, the export bucket stays open to public ACLs and policies."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_server_side_encryption_configuration.export[0].bucket == aws_s3_bucket.export[0].id,
+      aws_s3_bucket_server_side_encryption_configuration.export[0].region == aws_s3_bucket.export[0].region,
+    ])
+    error_message = "The encryption configuration must apply to the bucket the module creates, in its region: bound to any other, the export bucket gets no default encryption."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_policy.export[0].bucket == aws_s3_bucket.export[0].id,
+      aws_s3_bucket_policy.export[0].region == aws_s3_bucket.export[0].region,
+    ])
+    error_message = "The bucket policy must apply to the bucket the module creates, in its region: bound to any other, the export bucket accepts plain HTTP and no Data Exports delivery."
+  }
+
   assert {
     condition     = aws_bcmdataexports_export.focus[0].export[0].destination_configurations[0].s3_destination[0].s3_prefix == "finops/costfluent" && output.settings.export_prefix == "finops/costfluent"
     error_message = "A bucket the module creates must take the given prefix too."
